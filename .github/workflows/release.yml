@@ -1,0 +1,61 @@
+name: Release harness
+
+on:
+  push:
+    tags:
+      - 'ios-v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse tag
+        id: tag
+        run: |
+          tag="${GITHUB_REF_NAME}"               # e.g. ios-v0.2.0
+          harness="${tag%%-v*}"                  # ios
+          version="${tag#*-v}"                   # 0.2.0
+          echo "harness=$harness" >> "$GITHUB_OUTPUT"
+          echo "version=$version"  >> "$GITHUB_OUTPUT"
+
+      - name: Build artefact
+        id: build
+        env:
+          HARNESS: ${{ steps.tag.outputs.harness }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          src="src/$HARNESS"
+          staging="staging/$HARNESS"
+          zip_name="${HARNESS}-v${VERSION}.zip"
+
+          mkdir -p "$staging" dist
+          cp -r "$src"/. "$staging/"
+          echo "$VERSION" > "$staging/VERSION"
+
+          # Stamp version into CLAUDE.md header if present
+          if [ -f "$staging/CLAUDE.md" ]; then
+            sed -i "1s/^/<!-- harness: $HARNESS  version: $VERSION -->\n/" "$staging/CLAUDE.md"
+          fi
+
+          (cd staging && zip -r "../dist/$zip_name" "$HARNESS")
+
+          echo "zip_name=$zip_name" >> "$GITHUB_OUTPUT"
+          echo "zip_path=dist/$zip_name" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HARNESS:  ${{ steps.tag.outputs.harness }}
+          VERSION:  ${{ steps.tag.outputs.version }}
+          ZIP_PATH: ${{ steps.build.outputs.zip_path }}
+          ZIP_NAME: ${{ steps.build.outputs.zip_name }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${HARNESS} v${VERSION}" \
+            --notes "Unzip into an empty folder and open Claude Code to start." \
+            "$ZIP_PATH#$ZIP_NAME"

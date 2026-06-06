@@ -9,8 +9,7 @@ If this file and the repo state ever disagree, trust the repo and update this fi
 
 ## Currently working on
 
-**Task 1 — Repo foundations**: CLAUDE.md written, README updated, this plan created.
-Next step: create the root `justfile` with placeholder `build`, `zip`, and `release` recipes for the iOS harness.
+Nothing active — ready for next task.
 
 ---
 
@@ -18,14 +17,12 @@ Next step: create the root `justfile` with placeholder `build`, `zip`, and `rele
 
 - [x] **Task 0 — Settle source layout.** Decided on `src/<platform>/` (dropped the `md/` grouping level). iOS harness files moved to `src/ios/`.
 - [x] **Task 1 — Repo foundations.** CLAUDE.md, README.md, and this plan written.
-- [ ] **Task 2 — Root justfile.** Create `justfile` with `build`, `zip`, and `release` recipes for the iOS harness. Start with stubs — flesh out the build logic next.
-- [ ] **Task 3 — Build script.** Implement `just build ios`: flatten `src/ios/` into `dist/ios/` (copy files, resolve any `common/` includes, stamp version). Keep it simple — no includes exist yet so it's mostly a structured copy.
-- [ ] **Task 4 — Release pipeline.** Implement `just zip ios` and `just release ios`. Wire up GitHub releases via `gh`.
-- [ ] **Task 5 — iOS harness fixes.** Apply the three known fixes to `src/ios/` before the next release:
+- [x] **Task 2 — Release pipeline.** Tag-triggered GitHub Actions workflow (`release.yml`), `just bump <harness> <level>` recipe, `src/ios/.meta` version file, ADR 0002 written.
+- [ ] **Task 3 — iOS harness fixes.** Apply the three known fixes to `src/ios/` before the next release:
   1. Pick the simulator dynamically (not a hard-coded device name).
   2. Default `GENERATE_INFOPLIST_FILE: YES` in the scaffolded `project.yml`.
   3. Capture interaction-state screenshots from within XCUITest, not via `simctl`.
-- [ ] **Task 6 — Common block extraction.** Once a second harness exists, identify shared content and extract into `src/common/`. Not yet — YAGNI.
+- [ ] **Task 4 — Common block extraction.** Once a second harness exists, identify shared content and extract into `src/common/`. Not yet — YAGNI.
 
 ---
 
