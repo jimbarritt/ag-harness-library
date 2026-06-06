@@ -57,15 +57,43 @@ pnpm preflight
 
 If preflight exits non-zero, stop. Report the failed checks and their remediation. Do not scaffold or build until preflight passes.
 
-## Step 1 — Read the spec
+## Step 1 — Confirm app identity
+
+Derive the app name and bundle ID from the current directory name, then confirm with the
+user before proceeding. Do this once per fresh harness — skip if `plan.md` already records
+confirmed values.
+
+```bash
+dirname=$(basename "$PWD")   # e.g. "my-cool-app"
+```
+
+From `dirname`, derive:
+- **Display name** — title-case each word (split on `-` and `_`): `my-cool-app` → `My Cool App`
+- **Bundle ID** — `com.example.<dirname>` as a starting point (the user will need to replace `com.example` with their real organisation prefix)
+
+Present the defaults and ask for confirmation before any scaffolding:
+
+> I'll use the following values — let me know if you'd like to change anything:
+>
+> - **Display name:** My Cool App
+> - **Bundle ID:** com.example.my-cool-app *(replace `com.example` with your org prefix)*
+>
+> Shall I proceed with these?
+
+Wait for the user's response. Record the confirmed values in `doc/planning/plan.md` under
+a "App identity" section so they survive across sessions and don't need to be asked again.
+
+Use these confirmed values everywhere: `project.yml`, the generated `justfile`, `ExportOptions.plist`, and any Swift source that references the app name.
+
+## Step 2 — Read the spec
 
 Read `doc/planning/acceptance.md`. That file defines the current acceptance criteria. The app is "done" for this iteration only when every criterion there is satisfied and verified. If the spec defines a handoff message for completion, deliver it verbatim when the delta is done.
 
-## Step 2 — Scaffold (XcodeGen)
+## Step 3 — Scaffold (XcodeGen)
 
 - Organise Swift sources under `Sources/` and tests under `Tests/`.
-- Author/maintain a single `project.yml` describing the app target, the UI-test target, bundle id, deployment target, and schemes.
-- Generate a `justfile` at the repo root (see Appendix A) with the `run-local`, `deploy-local`, and `publish` recipes, filling in the app name, scheme, and bundle id to match the scaffold. Also generate an `ExportOptions.plist` (Appendix B) for the `publish` recipe.
+- Author/maintain a single `project.yml` describing the app target, the UI-test target, bundle id, deployment target, and schemes. Use the confirmed display name and bundle ID from Step 1.
+- Generate a `justfile` at the repo root (see Appendix A) with the `run-local`, `deploy-local`, and `publish` recipes, filling in the confirmed app name, scheme, and bundle id. Also generate an `ExportOptions.plist` (Appendix B) for the `publish` recipe.
 - Generate the project:
 
 ```bash
@@ -74,7 +102,7 @@ xcodegen generate
 
 The generated `<App>.xcodeproj` is git-ignored. `project.yml` is the source of truth.
 
-## Step 3 — Build
+## Step 4 — Build
 
 Use a fixed derived-data path so the built `.app` is at a predictable location:
 
@@ -82,24 +110,31 @@ Use a fixed derived-data path so the built `.app` is at a predictable location:
 xcodebuild \
   -project <App>.xcodeproj \
   -scheme <App> \
-  -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
   -derivedDataPath ./build \
-  build
+  build \
+  -destination "$(xcrun simctl list devices available -j | python3 -c \
+    'import sys,json;d=json.load(sys.stdin);iphones=[i for v in d["devices"].values() for i in v if "iPhone" in i["name"]];print("platform=iOS Simulator,id="+iphones[-1]["udid"] if iphones else "")')"
 ```
 
 Built app: `./build/Build/Products/Debug-iphonesimulator/<App>.app`.
-List available simulators first if the destination fails: `xcrun simctl list devices available`.
+List available simulators if the destination fails: `xcrun simctl list devices available`.
 
-## Step 4 — Run on the Simulator
+## Step 5 — Run on the Simulator
 
 ```bash
-xcrun simctl boot "iPhone 16" 2>/dev/null || true
-open -a Simulator
-xcrun simctl install booted ./build/Build/Products/Debug-iphonesimulator/<App>.app
-xcrun simctl launch booted <bundle-id>
+udid=$(xcrun simctl list devices booted -j | python3 -c \
+  'import sys,json;d=json.load(sys.stdin);x=[i["udid"] for v in d["devices"].values() for i in v if i.get("state")=="Booted"];print(x[0] if x else "")')
+if [ -z "$udid" ]; then
+  udid=$(xcrun simctl list devices available -j | python3 -c \
+    'import sys,json;d=json.load(sys.stdin);c=[i for v in d["devices"].values() for i in v if "iPhone" in i["name"]];print(c[-1]["udid"] if c else "")')
+  xcrun simctl boot "$udid"
+  open -a Simulator
+fi
+xcrun simctl install "$udid" ./build/Build/Products/Debug-iphonesimulator/<App>.app
+xcrun simctl launch "$udid" <bundle-id>
 ```
 
-## Step 5 — Verify against acceptance criteria
+## Step 6 — Verify against acceptance criteria
 
 Two complementary checks — both must be used:
 
@@ -108,8 +143,9 @@ Two complementary checks — both must be used:
    ```bash
    xcodebuild test \
      -project <App>.xcodeproj -scheme <App> \
-     -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
-     -derivedDataPath ./build
+     -derivedDataPath ./build \
+     -destination "$(xcrun simctl list devices available -j | python3 -c \
+       'import sys,json;d=json.load(sys.stdin);iphones=[i for v in d["devices"].values() for i in v if "iPhone" in i["name"]];print("platform=iOS Simulator,id="+iphones[-1]["udid"] if iphones else "")')"
    ```
 
 2. **Eyeball:** capture a screenshot and view it to confirm the UI looks right:
@@ -120,11 +156,11 @@ Two complementary checks — both must be used:
 
    Then open `screenshot.png` and check it against the spec.
 
-## Step 6 — Loop
+## Step 7 — Loop
 
-On any failure: read the build errors / test output / screenshot, form a hypothesis, make the smallest fix (edit Swift or `project.yml`), then go back to Step 2/3. Repeat until Step 5 passes cleanly. Don't ask for help on routine build errors — resolve them in the loop. Do surface anything that needs a real device (see below).
+On any failure: read the build errors / test output / screenshot, form a hypothesis, make the smallest fix (edit Swift or `project.yml`), then go back to Step 3/4. Repeat until Step 6 passes cleanly. Don't ask for help on routine build errors — resolve them in the loop. Do surface anything that needs a real device (see below).
 
-## Step 7 — Commit
+## Step 8 — Commit
 
 When acceptance criteria pass (the repo was already git-initialised in Step 0):
 
@@ -135,7 +171,7 @@ git commit -m "<concise conventional message>"
 
 Small, frequent commits at each green milestone are preferred over one big commit.
 
-## Step 8 — Snapshot the session log
+## Step 9 — Snapshot the session log
 
 Before stopping at a delta boundary, capture the session transcript for analysis:
 
@@ -149,7 +185,7 @@ This copies Claude Code's own JSONL transcript (which is otherwise auto-deleted 
 git add doc/session-logs/ && git commit -m "chore: session log for delta <n>"
 ```
 
-## Step 9 — Update the resume state (before you stop)
+## Step 10 — Update the resume state (before you stop)
 
 Update `doc/planning/plan.md` so the repo is left resumable (Hard rule 6): set the current
 delta + status, what was just completed, the single **next step**, and any device-gated
@@ -180,14 +216,14 @@ Prefer checking current docs over guessing: Apple Developer docs for framework/S
 
 ## Appendix A — `justfile` to generate
 
-Generate this at the repo root, replacing `app`, `scheme`, and `bundle_id` with the
-scaffold's real values. Requires `just` (`brew install just`).
+Generate this at the repo root, replacing the variable values with the confirmed app name,
+scheme, and bundle ID from Step 1. Requires `just` (`brew install just`).
 
 ```just
 # justfile — generated by the harness
-app       := "App"
-scheme    := "App"
-bundle_id := "com.example.App"
+app       := "<display-name>"
+scheme    := "<display-name>"
+bundle_id := "<bundle-id>"
 derived   := "./build"
 
 # Regenerate the Xcode project from project.yml

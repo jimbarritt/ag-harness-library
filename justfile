@@ -29,6 +29,11 @@ bump harness level:
     echo "  Bumped {{harness}} to v$new — run: just push-tags"
     echo ""
 
+# Show the current version of a harness.
+# Usage: just version <harness>
+version harness:
+    @jq -r '"{{harness}} v" + .version' "src/{{harness}}/.meta"
+
 # Push commits and all tags to origin. Run after `just bump`.
 push-tags:
     git push && git push --tags
