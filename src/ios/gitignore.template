@@ -1,0 +1,18 @@
+# Generated Xcode project (source of truth is project.yml)
+*.xcodeproj
+
+# Build output
+build/
+DerivedData/
+*.app
+
+# Node
+node_modules/
+
+# Screenshots from the verify step
+screenshot*.png
+
+# macOS / Xcode cruft
+.DS_Store
+xcuserdata/
+*.xcuserstate
