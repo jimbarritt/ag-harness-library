@@ -32,30 +32,38 @@ jobs:
           src="src/$HARNESS"
           staging="staging/$HARNESS"
           zip_name="${HARNESS}-v${VERSION}.zip"
+          zip_path="dist/${zip_name}"
 
           mkdir -p "$staging" dist
           cp -r "$src"/. "$staging/"
           echo "$VERSION" > "$staging/VERSION"
 
-          # Stamp version into CLAUDE.md header if present
           if [ -f "$staging/CLAUDE.md" ]; then
             sed -i "1s/^/<!-- harness: $HARNESS  version: $VERSION -->\n/" "$staging/CLAUDE.md"
           fi
 
           (cd "$staging" && zip -r "../../dist/$zip_name" . --exclude ".meta")
 
+          echo "--- dist contents ---"
+          ls -lh dist/
+
           echo "zip_name=$zip_name" >> "$GITHUB_OUTPUT"
-          echo "zip_path=dist/$zip_name" >> "$GITHUB_OUTPUT"
+          echo "zip_path=$zip_path" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           HARNESS:  ${{ steps.tag.outputs.harness }}
           VERSION:  ${{ steps.tag.outputs.version }}
-          ZIP_PATH: ${{ steps.build.outputs.zip_path }}
-          ZIP_NAME: ${{ steps.build.outputs.zip_name }}
         run: |
           gh release create "${GITHUB_REF_NAME}" \
             --title "${HARNESS} v${VERSION}" \
-            --notes "Unzip into an empty folder and open Claude Code to start." \
-            "$ZIP_PATH#$ZIP_NAME"
+            --notes "Unzip into an empty folder and open Claude Code to start."
+
+      - name: Upload artefact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ZIP_PATH: ${{ steps.build.outputs.zip_path }}
+          ZIP_NAME: ${{ steps.build.outputs.zip_name }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" "${ZIP_PATH}#${ZIP_NAME}"

@@ -23,7 +23,7 @@ bump harness level:
     new="$major.$minor.$patch"
     jq --arg v "$new" '.version = $v' "$meta" > "$meta.tmp" && mv "$meta.tmp" "$meta"
     git add "$meta"
-    git commit -m "chore: bump {{harness}} to v$new"
+    git commit -m "[release] {{harness}} -> v$new"
     git tag "{{harness}}-v$new"
     echo ""
     echo "  Bumped {{harness}} to v$new — run: just push-tags"
@@ -42,11 +42,14 @@ list-releases:
       | while IFS=$'\t' read -r tag date; do
           echo "$tag  $date"
           gh release view "$tag" --json assets \
-            | jq -r '.assets[] | "  " + .browserDownloadUrl'
+            | jq -r '.assets[] | "  " + .url'
           echo ""
         done
 
 # Push commits and all tags to origin, then watch the release workflow.
 push-tags:
+    #!/usr/bin/env bash
+    set -euo pipefail
     git push && git push --tags
-    ops/local/watch-release.sh
+    tag=$(git describe --tags --abbrev=0)
+    ops/local/watch-release.sh "$tag"
