@@ -34,6 +34,19 @@ bump harness level:
 version harness:
     @jq -r '"{{harness}} v" + .version' "src/{{harness}}/.meta"
 
-# Push commits and all tags to origin. Run after `just bump`.
+# List all releases with their asset download URLs.
+list-releases:
+    #!/usr/bin/env bash
+    gh release list --json tagName,publishedAt \
+      | jq -r '.[] | .tagName + "\t" + .publishedAt[:10]' \
+      | while IFS=$'\t' read -r tag date; do
+          echo "$tag  $date"
+          gh release view "$tag" --json assets \
+            | jq -r '.assets[] | "  " + .browserDownloadUrl'
+          echo ""
+        done
+
+# Push commits and all tags to origin, then watch the release workflow.
 push-tags:
     git push && git push --tags
+    ops/local/watch-release.sh

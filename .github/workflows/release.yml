@@ -42,7 +42,7 @@ jobs:
             sed -i "1s/^/<!-- harness: $HARNESS  version: $VERSION -->\n/" "$staging/CLAUDE.md"
           fi
 
-          (cd staging && zip -r "../dist/$zip_name" "$HARNESS")
+          (cd "$staging" && zip -r "../../dist/$zip_name" . --exclude ".meta")
 
           echo "zip_name=$zip_name" >> "$GITHUB_OUTPUT"
           echo "zip_path=dist/$zip_name" >> "$GITHUB_OUTPUT"
