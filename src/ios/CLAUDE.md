@@ -34,10 +34,11 @@ This whole block is idempotent — safe to run every session:
 
 # 2. Harness scripts -> ops/local/
 mkdir -p ops/local
-for f in preflight.ts session-log.ts; do
+for f in preflight.ts session-log.ts sim-dest.sh; do
   [ -f "$f" ] && mv "$f" ops/local/ || true
   [ -f "scripts/$f" ] && mv "scripts/$f" ops/local/ || true
 done
+chmod +x ops/local/sim-dest.sh 2>/dev/null || true
 rmdir scripts 2>/dev/null || true
 
 # 3. Planning docs -> doc/planning/ ; create the logs dir
@@ -97,7 +98,7 @@ Read `doc/planning/acceptance.md`. That file defines the current acceptance crit
 ## Step 3 — Scaffold (XcodeGen)
 
 - Organise Swift sources under `Sources/` and tests under `Tests/`.
-- Author/maintain a single `project.yml` describing the app target, the UI-test target, bundle id, deployment target, and schemes. Use the confirmed display name and bundle ID from Step 1.
+- Author a `project.yml` using the template below, substituting the confirmed values from Step 1. `GENERATE_INFOPLIST_FILE: YES` is required — without it Xcode expects a hand-written `Info.plist` and the build will fail.
 - Generate a `justfile` at the repo root (see Appendix A) with the `run-local`, `deploy-local`, and `publish` recipes, filling in the confirmed app name, scheme, and bundle id. Also generate an `ExportOptions.plist` (Appendix B) for the `publish` recipe.
 - Generate the project:
 
@@ -107,31 +108,75 @@ xcodegen generate
 
 The generated `<ProductName>.xcodeproj` is git-ignored. `project.yml` is the source of truth.
 
+### `project.yml` template
+
+```yaml
+name: <ProductName>
+options:
+  deploymentTarget:
+    iOS: "17.0"
+
+targets:
+  <ProductName>:
+    type: application
+    platform: iOS
+    sources: Sources/
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: <bundle-id>
+        GENERATE_INFOPLIST_FILE: YES
+        MARKETING_VERSION: 1.0.0
+        CURRENT_PROJECT_VERSION: 1
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        SWIFT_VERSION: "5.9"
+
+  <ProductName>UITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: Tests/
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: <bundle-id>.uitests
+    dependencies:
+      - target: <ProductName>
+
+schemes:
+  <ProductName>:
+    build:
+      targets:
+        <ProductName>: all
+        <ProductName>UITests: [test]
+    test:
+      targets:
+        - <ProductName>UITests
+```
+
+### XCUITest — SwiftUI element queries
+
+SwiftUI views don't expose themselves via `app.otherElements["id"]` — use `.descendants` instead:
+
+```swift
+// Wrong (UIKit-style, fails on SwiftUI containers)
+app.otherElements["rootView"].exists
+
+// Correct
+app.descendants(matching: .any).matching(identifier: "rootView").firstMatch.exists
+```
+
+Tag SwiftUI views with `.accessibilityIdentifier("rootView")` in the source so tests can find them.
+
 ## Step 4 — Build
 
 Use a fixed derived-data path so the built `.app` is at a predictable location:
 
 ```bash
-dest=$(xcrun simctl list devices available -j | python3 -c '
-import sys, json, re
-d = json.load(sys.stdin)
-iphones = []
-for rt, devs in d["devices"].items():
-    m = re.search(r"iOS-(\d+)-(\d+)", rt)
-    if not m: continue
-    ver = (int(m.group(1)), int(m.group(2)))
-    for dev in devs:
-        if "iPhone" in dev["name"]:
-            iphones.append((ver, dev["name"], dev["udid"]))
-iphones.sort()
-print("platform=iOS Simulator,id=" + iphones[-1][2] if iphones else "")
-')
-[ -z "$dest" ] && { echo "error: no iPhone simulator available — open Xcode > Settings > Components" >&2; exit 1; }
+udid=$(ops/local/sim-dest.sh)
 xcodebuild \
   -project <ProductName>.xcodeproj \
   -scheme <ProductName> \
   -derivedDataPath ./build \
-  -destination "$dest" \
+  -destination "platform=iOS Simulator,id=$udid" \
   build
 ```
 
@@ -141,31 +186,7 @@ List available simulators if the destination fails: `xcrun simctl list devices a
 ## Step 5 — Run on the Simulator
 
 ```bash
-udid=$(xcrun simctl list devices booted -j | python3 -c '
-import sys, json
-d = json.load(sys.stdin)
-booted = [i["udid"] for v in d["devices"].values() for i in v if i.get("state") == "Booted"]
-print(booted[0] if booted else "")
-')
-if [ -z "$udid" ]; then
-  udid=$(xcrun simctl list devices available -j | python3 -c '
-import sys, json, re
-d = json.load(sys.stdin)
-iphones = []
-for rt, devs in d["devices"].items():
-    m = re.search(r"iOS-(\d+)-(\d+)", rt)
-    if not m: continue
-    ver = (int(m.group(1)), int(m.group(2)))
-    for dev in devs:
-        if "iPhone" in dev["name"]:
-            iphones.append((ver, dev["name"], dev["udid"]))
-iphones.sort()
-print(iphones[-1][2] if iphones else "")
-')
-  [ -z "$udid" ] && { echo "error: no iPhone simulator available" >&2; exit 1; }
-  xcrun simctl boot "$udid"
-  open -a Simulator
-fi
+udid=$(ops/local/sim-dest.sh --boot)
 xcrun simctl install "$udid" ./build/Build/Products/Debug-iphonesimulator/<ProductName>.app
 xcrun simctl launch "$udid" <bundle-id>
 ```
@@ -177,51 +198,38 @@ Two complementary checks — both must be used:
 1. **Machine gate (authoritative): XCUITest.** Encode each acceptance criterion as a UI test assertion (element exists, tap produces the expected state). Run:
 
    ```bash
-   dest=$(xcrun simctl list devices available -j | python3 -c '
-import sys, json, re
-d = json.load(sys.stdin)
-iphones = []
-for rt, devs in d["devices"].items():
-    m = re.search(r"iOS-(\d+)-(\d+)", rt)
-    if not m: continue
-    ver = (int(m.group(1)), int(m.group(2)))
-    for dev in devs:
-        if "iPhone" in dev["name"]:
-            iphones.append((ver, dev["name"], dev["udid"]))
-iphones.sort()
-print("platform=iOS Simulator,id=" + iphones[-1][2] if iphones else "")
-')
-   [ -z "$dest" ] && { echo "error: no iPhone simulator available" >&2; exit 1; }
+   udid=$(ops/local/sim-dest.sh)
    xcodebuild test \
      -project <ProductName>.xcodeproj -scheme <ProductName> \
      -derivedDataPath ./build \
-     -destination "$dest"
+     -destination "platform=iOS Simulator,id=$udid"
    ```
 
-2. **Eyeball:** capture a screenshot and view it to confirm the UI looks right:
+2. **Eyeball:** capture a screenshot from within the XCUITest at the moment the assertion passes — this gives a screenshot tied to the verified state, not a race against the simulator clock. Add this to the test:
+
+   ```swift
+   let screenshot = XCUIScreen.main.screenshot()
+   let attachment = XCTAttachment(screenshot: screenshot)
+   attachment.name = "launch-screen"
+   attachment.lifetime = .keepAlways
+   add(attachment)
+   ```
+
+   Then extract and view it:
 
    ```bash
-   xcrun simctl io booted screenshot screenshot.png
+   xcrun xcresulttool get --path build/Logs/Test/*.xcresult \
+     --type directory --output-path build/test-results 2>/dev/null || true
+   find build/test-results -name "*.png" | head -5
    ```
 
-   Then open `screenshot.png` and check it against the spec.
+   Open the first `.png` found and check it against the spec. If extraction is fiddly, fall back to `xcrun simctl io booted screenshot screenshot.png` as a quick sanity check.
 
 ## Step 7 — Loop
 
 On any failure: read the build errors / test output / screenshot, form a hypothesis, make the smallest fix (edit Swift or `project.yml`), then go back to Step 3/4. Repeat until Step 6 passes cleanly. Don't ask for help on routine build errors — resolve them in the loop. Do surface anything that needs a real device (see below).
 
-## Step 8 — Commit
-
-When acceptance criteria pass (the repo was already git-initialised in Step 0):
-
-```bash
-git add -A
-git commit -m "<concise conventional message>"
-```
-
-Small, frequent commits at each green milestone are preferred over one big commit.
-
-## Step 9 — Snapshot the session log
+## Step 8 — Snapshot the session log
 
 Before stopping at a delta boundary, capture the session transcript for analysis:
 
@@ -229,26 +237,23 @@ Before stopping at a delta boundary, capture the session transcript for analysis
 pnpm session-log
 ```
 
-This copies Claude Code's own JSONL transcript (which is otherwise auto-deleted after 30 days) into `doc/session-logs/` and prints harness metrics (build attempts vs. successes, test runs, commits, duration). Commit the snapshot together with the delta:
+This copies Claude Code's own JSONL transcript (which is otherwise auto-deleted after 30 days) into `doc/session-logs/` and prints harness metrics (build attempts vs. successes, test runs, commits, duration).
 
-```bash
-git add doc/session-logs/ && git commit -m "chore: session log for delta <n>"
-```
-
-## Step 10 — Update the resume state (before you stop)
+## Step 9 — Update the resume state
 
 Update `doc/planning/plan.md` so the repo is left resumable (Hard rule 6): set the current
 delta + status, what was just completed, the single **next step**, and any device-gated
 blockers. When a new delta is defined, give it its own `doc/planning/delta-<n>.md` and
-mirror its active criteria into `doc/planning/acceptance.md`. Commit:
-
-```bash
-git add doc/planning/ && git commit -m "chore: update resume state"
-```
+mirror its active criteria into `doc/planning/acceptance.md`.
 
 A fresh session + me typing **continue** should be enough to pick up from here with no
-other context. After this, **stop and wait for my go-ahead** (Hard rule 5) unless I've
-told you to keep running.
+other context.
+
+## Step 10 — Hand off to the user (commit is theirs)
+
+Do not commit. The user commits when they are happy with the result. Deliver the handoff
+message from `doc/planning/acceptance.md` verbatim — it includes the exact commit commands
+to run. Then **stop and wait** (Hard rule 5) unless I've told you to keep going.
 
 ## Things that CANNOT be verified here (flag, don't fake)
 

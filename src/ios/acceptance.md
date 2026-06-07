@@ -9,7 +9,7 @@ in `doc/planning/` (see `plan.md`).
 ## Current target: Delta 0 — clean scaffold
 
 Purpose: produce a clean, building iOS app ready for feature development, and prove the
-full write → build → run → verify → commit chain works end to end.
+full write → build → run → verify chain works end to end.
 
 The app name and bundle ID are confirmed with the user in Step 1 before scaffolding begins.
 
@@ -25,9 +25,14 @@ The app name and bundle ID are confirmed with the user in Step 1 before scaffold
 8. A `justfile` is generated with working `run-local`, `deploy-local`, and `publish` recipes (plus `ExportOptions.plist`), with the confirmed app name, scheme, and bundle id filled in. `run-local` is verified to launch the app in the Simulator.
 
 ### Done
-When 1–8 pass: commit (`feat: clean iOS app scaffold`), update the resume state
-(`plan.md`), then **stop** and deliver this handoff message to me verbatim:
+When 1–8 pass: snapshot the session log, update `plan.md`, then **stop** and deliver
+this handoff message to me verbatim:
 
-> Ok, everything is scaffolded, ready for you to define the app. Try adding a simple
-> feature like "Add a button to make the screen go pink" and check that the end-to-end
-> harness is working. Then we can work together to define further deltas. The sky is the limit!
+> Everything is scaffolded and green. When you're happy, commit with:
+>
+> ```
+> git add -A
+> git commit -m "feat: clean iOS app scaffold"
+> ```
+>
+> Then try adding a simple feature — something like "add a button that makes the screen go pink" — to check the end-to-end harness is working. After that we can define further deltas together. The sky is the limit!

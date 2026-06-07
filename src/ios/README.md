@@ -23,6 +23,7 @@ Day-to-day commands once scaffolded (requires `just` — `brew install just`):
 - `CLAUDE.md` — the instructions the agent follows. The brain of the harness.
 - `preflight.ts` — prerequisite checks (Xcode, simulators, toolchain).
 - `session-log.ts` — snapshots the session transcript for analysis.
+- `sim-dest.sh` — outputs the UDID of the best available iPhone simulator (used internally by the build loop).
 - `acceptance.md` — acceptance criteria for the current delta (Delta 0 = clean scaffold).
 - `plan.md` — master plan and always-current resume state. A fresh session + **"continue"** resumes from here.
 - `package.json` — pnpm + tsx for the TypeScript scripts.
