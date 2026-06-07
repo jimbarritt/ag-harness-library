@@ -37,14 +37,13 @@ version harness:
 # List all releases with their asset download URLs.
 list-releases:
     #!/usr/bin/env bash
-    gh release list --json tagName,publishedAt \
-      | jq -r '.[] | .tagName + "\t" + .publishedAt[:10]' \
-      | while IFS=$'\t' read -r tag date; do
-          echo "$tag  $date"
-          gh release view "$tag" --json assets \
-            | jq -r '.assets[] | "  " + .url'
-          echo ""
-        done
+    while IFS=$'\t' read -r tag date; do
+      echo "$tag  $date"
+      gh release view "$tag" --json assets \
+        | jq -r '.assets[] | "  " + .url'
+      echo ""
+    done < <(gh release list --json tagName,publishedAt \
+      | jq -r '.[] | .tagName + "\t" + .publishedAt[:10]')
 
 # Push commits and all tags to origin, then watch the release workflow.
 push-tags:

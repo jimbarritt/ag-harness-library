@@ -6,6 +6,7 @@
  */
 import { execSync } from "node:child_process";
 import { arch, platform } from "node:process";
+import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
 
 type Severity = "hard" | "soft";
 interface Result {
@@ -169,6 +170,15 @@ check("XcodeGen", "soft", () => {
   };
 });
 
+check("python3", "hard", () => {
+  const v = run("python3 --version");
+  return {
+    ok: v !== null,
+    detail: v ?? "python3 not found",
+    fix: "python3 is used for simulator selection. Install via `xcode-select --install` or `brew install python3`.",
+  };
+});
+
 check("just", "soft", () => {
   const v = run("just --version");
   return {
@@ -177,6 +187,23 @@ check("just", "soft", () => {
     fix: "Install: `brew install just`. Needed to run the generated justfile recipes (run-local, deploy-local, publish).",
   };
 });
+
+// --- Harness version stamp ----------------------------------------------
+const versionFile = "HARNESS_VERSION";
+if (existsSync(versionFile)) {
+  const version = readFileSync(versionFile, "utf8").trim();
+  const planPaths = ["doc/planning/plan.md", "plan.md"];
+  const planPath = planPaths.find(existsSync);
+  if (planPath) {
+    const existing = readFileSync(planPath, "utf8");
+    const stamp = `<!-- generated with iOS harness v${version} -->\n`;
+    if (!existing.startsWith(stamp)) {
+      writeFileSync(planPath, stamp + existing);
+    }
+  }
+  mkdirSync("doc", { recursive: true });
+  renameSync(versionFile, "doc/HARNESS_VERSION");
+}
 
 // --- Report -------------------------------------------------------------
 console.log("\n  iOS Build Harness — preflight\n  " + "-".repeat(40));

@@ -45,6 +45,9 @@ mkdir -p doc/planning doc/session-logs
 for f in plan.md acceptance.md; do
   [ -f "$f" ] && mv "$f" doc/planning/ || true
 done
+
+# 4. Activate gitignore
+[ -f gitignore.template ] && mv gitignore.template .gitignore || true
 ```
 
 `package.json` already points at `ops/local/…`, so once the moves are done the scripts
@@ -67,16 +70,18 @@ confirmed values.
 dirname=$(basename "$PWD")   # e.g. "my-cool-app"
 ```
 
-From `dirname`, derive:
+From `dirname`, derive three values:
 - **Display name** — title-case each word (split on `-` and `_`): `my-cool-app` → `My Cool App`
-- **Bundle ID** — `com.example.<dirname>` as a starting point (the user will need to replace `com.example` with their real organisation prefix)
+- **Product name** — strip separators, concatenate title-cased words: `my-cool-app` → `MyCoolApp`. Used as the Xcode target name and scheme — spaces cause quoting issues in xcodebuild commands.
+- **Bundle ID** — lowercase, separators stripped: `my-cool-app` → `com.example.mycoolapp`. The user will need to replace `com.example` with their real organisation prefix.
 
 Present the defaults and ask for confirmation before any scaffolding:
 
 > I'll use the following values — let me know if you'd like to change anything:
 >
 > - **Display name:** My Cool App
-> - **Bundle ID:** com.example.my-cool-app *(replace `com.example` with your org prefix)*
+> - **Product name** (Xcode target + scheme): MyCoolApp
+> - **Bundle ID:** com.example.mycoolapp *(replace `com.example` with your org prefix)*
 >
 > Shall I proceed with these?
 
@@ -100,37 +105,68 @@ Read `doc/planning/acceptance.md`. That file defines the current acceptance crit
 xcodegen generate
 ```
 
-The generated `<App>.xcodeproj` is git-ignored. `project.yml` is the source of truth.
+The generated `<ProductName>.xcodeproj` is git-ignored. `project.yml` is the source of truth.
 
 ## Step 4 — Build
 
 Use a fixed derived-data path so the built `.app` is at a predictable location:
 
 ```bash
+dest=$(xcrun simctl list devices available -j | python3 -c '
+import sys, json, re
+d = json.load(sys.stdin)
+iphones = []
+for rt, devs in d["devices"].items():
+    m = re.search(r"iOS-(\d+)-(\d+)", rt)
+    if not m: continue
+    ver = (int(m.group(1)), int(m.group(2)))
+    for dev in devs:
+        if "iPhone" in dev["name"]:
+            iphones.append((ver, dev["name"], dev["udid"]))
+iphones.sort()
+print("platform=iOS Simulator,id=" + iphones[-1][2] if iphones else "")
+')
+[ -z "$dest" ] && { echo "error: no iPhone simulator available — open Xcode > Settings > Components" >&2; exit 1; }
 xcodebuild \
-  -project <App>.xcodeproj \
-  -scheme <App> \
+  -project <ProductName>.xcodeproj \
+  -scheme <ProductName> \
   -derivedDataPath ./build \
-  build \
-  -destination "$(xcrun simctl list devices available -j | python3 -c \
-    'import sys,json;d=json.load(sys.stdin);iphones=[i for v in d["devices"].values() for i in v if "iPhone" in i["name"]];print("platform=iOS Simulator,id="+iphones[-1]["udid"] if iphones else "")')"
+  -destination "$dest" \
+  build
 ```
 
-Built app: `./build/Build/Products/Debug-iphonesimulator/<App>.app`.
+Built app: `./build/Build/Products/Debug-iphonesimulator/<ProductName>.app`.
 List available simulators if the destination fails: `xcrun simctl list devices available`.
 
 ## Step 5 — Run on the Simulator
 
 ```bash
-udid=$(xcrun simctl list devices booted -j | python3 -c \
-  'import sys,json;d=json.load(sys.stdin);x=[i["udid"] for v in d["devices"].values() for i in v if i.get("state")=="Booted"];print(x[0] if x else "")')
+udid=$(xcrun simctl list devices booted -j | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+booted = [i["udid"] for v in d["devices"].values() for i in v if i.get("state") == "Booted"]
+print(booted[0] if booted else "")
+')
 if [ -z "$udid" ]; then
-  udid=$(xcrun simctl list devices available -j | python3 -c \
-    'import sys,json;d=json.load(sys.stdin);c=[i for v in d["devices"].values() for i in v if "iPhone" in i["name"]];print(c[-1]["udid"] if c else "")')
+  udid=$(xcrun simctl list devices available -j | python3 -c '
+import sys, json, re
+d = json.load(sys.stdin)
+iphones = []
+for rt, devs in d["devices"].items():
+    m = re.search(r"iOS-(\d+)-(\d+)", rt)
+    if not m: continue
+    ver = (int(m.group(1)), int(m.group(2)))
+    for dev in devs:
+        if "iPhone" in dev["name"]:
+            iphones.append((ver, dev["name"], dev["udid"]))
+iphones.sort()
+print(iphones[-1][2] if iphones else "")
+')
+  [ -z "$udid" ] && { echo "error: no iPhone simulator available" >&2; exit 1; }
   xcrun simctl boot "$udid"
   open -a Simulator
 fi
-xcrun simctl install "$udid" ./build/Build/Products/Debug-iphonesimulator/<App>.app
+xcrun simctl install "$udid" ./build/Build/Products/Debug-iphonesimulator/<ProductName>.app
 xcrun simctl launch "$udid" <bundle-id>
 ```
 
@@ -141,11 +177,25 @@ Two complementary checks — both must be used:
 1. **Machine gate (authoritative): XCUITest.** Encode each acceptance criterion as a UI test assertion (element exists, tap produces the expected state). Run:
 
    ```bash
+   dest=$(xcrun simctl list devices available -j | python3 -c '
+import sys, json, re
+d = json.load(sys.stdin)
+iphones = []
+for rt, devs in d["devices"].items():
+    m = re.search(r"iOS-(\d+)-(\d+)", rt)
+    if not m: continue
+    ver = (int(m.group(1)), int(m.group(2)))
+    for dev in devs:
+        if "iPhone" in dev["name"]:
+            iphones.append((ver, dev["name"], dev["udid"]))
+iphones.sort()
+print("platform=iOS Simulator,id=" + iphones[-1][2] if iphones else "")
+')
+   [ -z "$dest" ] && { echo "error: no iPhone simulator available" >&2; exit 1; }
    xcodebuild test \
-     -project <App>.xcodeproj -scheme <App> \
+     -project <ProductName>.xcodeproj -scheme <ProductName> \
      -derivedDataPath ./build \
-     -destination "$(xcrun simctl list devices available -j | python3 -c \
-       'import sys,json;d=json.load(sys.stdin);iphones=[i for v in d["devices"].values() for i in v if "iPhone" in i["name"]];print("platform=iOS Simulator,id="+iphones[-1]["udid"] if iphones else "")')"
+     -destination "$dest"
    ```
 
 2. **Eyeball:** capture a screenshot and view it to confirm the UI looks right:
@@ -221,8 +271,8 @@ scheme, and bundle ID from Step 1. Requires `just` (`brew install just`).
 
 ```just
 # justfile — generated by the harness
-app       := "<display-name>"
-scheme    := "<display-name>"
+app       := "<ProductName>"
+scheme    := "<ProductName>"
 bundle_id := "<bundle-id>"
 derived   := "./build"
 

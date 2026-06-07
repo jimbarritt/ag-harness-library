@@ -36,7 +36,7 @@ jobs:
 
           mkdir -p "$staging" dist
           cp -r "$src"/. "$staging/"
-          echo "$VERSION" > "$staging/VERSION"
+          echo "$VERSION" > "$staging/HARNESS_VERSION"
 
           if [ -f "$staging/CLAUDE.md" ]; then
             sed -i "1s/^/<!-- harness: $HARNESS  version: $VERSION -->\n/" "$staging/CLAUDE.md"
